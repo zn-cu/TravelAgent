@@ -31,6 +31,7 @@ from langgraph.types import Command
 from pydantic import BaseModel
 
 from . import auth, config
+from . import downloads
 from .agent import build_ceo_agent
 from .mcp_gateway import open_toolbox
 from .store import DEFAULT_TITLE, new_session
@@ -73,6 +74,9 @@ if config.ACCESS_PASSWORD:
         auth.BasicAuthMiddleware,
         username=config.ACCESS_USER,
         password=config.ACCESS_PASSWORD,
+        # 下载类路径允许用「带签名的 URL」免登录：
+        # 手机浏览器下载时会另起连接、丢掉 Authorization 头，否则会「下载错误」。
+        signed_paths=("/api/download", "/api/proposal.pdf"),
     )
     print(f"已启用访问口令：用户名 {config.ACCESS_USER}", flush=True)
 else:
@@ -94,6 +98,19 @@ def _lock_for(session_id: str) -> asyncio.Lock:
 # --------------------------------------------------------------------------- #
 # 页面与静态
 # --------------------------------------------------------------------------- #
+def _download_links(file: str | None) -> dict[str, str]:
+    """给前端生成带签名的下载链接（不依赖 Basic Auth 登录态）。"""
+    if not file:
+        return {}
+    secret = config.ACCESS_PASSWORD
+    if not secret:
+        return {"md": f"/api/download?name={quote(file)}", "pdf": f"/api/proposal.pdf?name={quote(file)}"}
+    return {
+        "md": downloads.url_for("/api/download", file, secret),
+        "pdf": downloads.url_for("/api/proposal.pdf", file, secret),
+    }
+
+
 @app.get("/")
 async def index() -> FileResponse:
     page = WEB_DIR / "index.html"
@@ -141,6 +158,9 @@ async def get_session(sid: str):
     session = await app.state.store.get(sid)
     if not session:
         raise HTTPException(404, "会话不存在")
+    # 刷新页面后也要能下载：结果里补上签名链接
+    if isinstance(session.get("result"), dict):
+        session["result"]["links"] = _download_links(session["result"].get("file"))
     return session
 
 
@@ -234,7 +254,9 @@ async def _run_turn(session: dict, payload, cfg: dict):
         session["result"] = {"message": display, "file": file}
         session["status"] = status
         await app.state.store.save(session)
-        yield dumps({"type": "result", "message": display, "file": file})
+        yield dumps(
+            {"type": "result", "message": display, "file": file, "links": _download_links(file)}
+        )
 
 
 def _cfg(sid: str) -> dict:

@@ -56,9 +56,13 @@ def make_app(username="sunlianwu", password="secret"):
     return middleware, recorder
 
 
-def call(middleware, headers=None, scope_type="http"):
-    recorder = middleware.app  # 只是拿不到，改用外部 recorder
-    scope = {"type": scope_type, "headers": headers or []}
+def call(middleware, headers=None, scope_type="http", query_string=b"", path="/"):
+    scope = {
+        "type": scope_type,
+        "headers": headers or [],
+        "query_string": query_string,
+        "path": path,
+    }
     out = Recorder()
 
     async def receive():
@@ -125,6 +129,43 @@ class TestBasicAuth(unittest.TestCase):
         middleware, recorder = make_app()
         call(middleware, scope_type="lifespan")
         self.assertTrue(recorder.called_downstream)
+
+    # ------------------------------------------------------------------ #
+    # 带签名的下载 URL（手机下载不依赖登录态）
+    # ------------------------------------------------------------------ #
+    def test_signed_download_url_without_auth(self):
+        from urllib.parse import quote
+
+        from travel_agent.downloads import sign
+
+        middleware, recorder = make_app()
+        middleware.signed_paths = ("/api/download",)
+        token = sign("策划书.md", "secret")
+        query = f"name={quote('策划书.md')}&t={quote(token)}".encode()
+
+        out = call(middleware, headers=[], query_string=query, path="/api/download")
+        self.assertEqual(out.status, 200)
+        self.assertTrue(recorder.called_downstream)
+
+    def test_signature_does_not_open_other_paths(self):
+        from urllib.parse import quote
+
+        from travel_agent.downloads import sign
+
+        middleware, recorder = make_app()
+        middleware.signed_paths = ("/api/download",)
+        query = f"name=x&t={quote(sign('x', 'secret'))}".encode()
+
+        out = call(middleware, headers=[], query_string=query, path="/api/sessions")
+        self.assertEqual(out.status, 401)
+        self.assertFalse(recorder.called_downstream)
+
+    def test_signed_path_with_bad_token_still_401(self):
+        middleware, recorder = make_app()
+        middleware.signed_paths = ("/api/download",)
+        out = call(middleware, headers=[], query_string=b"name=x&t=1.deadbeef", path="/api/download")
+        self.assertEqual(out.status, 401)
+        self.assertFalse(recorder.called_downstream)
 
 
 if __name__ == "__main__":

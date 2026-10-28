@@ -17,19 +17,32 @@ from __future__ import annotations
 import base64
 import secrets
 
+from . import downloads
+
 
 class BasicAuthMiddleware:
     """给 ASGI 应用套一层 Basic Auth。
 
     用法（FastAPI）：
         app.add_middleware(BasicAuthMiddleware, username="sunlianwu", password="xxx")
+
+    `signed_paths` 里的路径允许用「带签名的 URL」免登录访问——手机浏览器下载文件时
+    会另起连接、丢掉 Authorization 头，靠签名才不会 401。密钥就是 password。
     """
 
-    def __init__(self, app, username: str = "", password: str = "", realm: str = "travel-agent"):
+    def __init__(
+        self,
+        app,
+        username: str = "",
+        password: str = "",
+        realm: str = "travel-agent",
+        signed_paths: tuple[str, ...] = (),
+    ):
         self.app = app
         self.username = username or "admin"
         self.password = password or ""
         self.realm = realm
+        self.signed_paths = tuple(signed_paths)
         # 预编码，省得每次请求都拼
         self._expected = base64.b64encode(f"{self.username}:{self.password}".encode()).decode()
 
@@ -41,6 +54,12 @@ class BasicAuthMiddleware:
             return
 
         if self._authorized(scope.get("headers") or []):
+            await self.app(scope, receive, send)
+            return
+
+        if downloads.signed_request_ok(
+            scope.get("path", ""), self.signed_paths, scope.get("query_string", b""), self.password
+        ):
             await self.app(scope, receive, send)
             return
 

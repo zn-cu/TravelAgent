@@ -552,7 +552,7 @@ async function selectSession(id) {
   setStatus(session.status);
 
   if (session.result && session.result.message) {
-    showResult(session.result.message, session.result.file);
+    showResult(session.result.message, session.result.file, session.result.links);
   } else {
     resultBox.style.display = 'none';
   }
@@ -631,17 +631,21 @@ function exportPdf(title) {
   setTimeout(() => win.print(), 300);
 }
 
-function showResult(message, file) {
+function showResult(message, file, links) {
   resultBody.innerHTML = renderMarkdown(message || '');
 
   // 「最终方案」这个标题只在真的产出策划书时才用，否则那只是一句回复
   const caption = resultBox.querySelector('.caption');
   if (caption) caption.textContent = file ? '最终方案' : '回复';
 
+  // 服务端给的带签名链接优先：手机的下载任务不带登录态，普通链接会 401
+  const mdUrl = (links && links.md) || ('/api/download?name=' + encodeURIComponent(file || ''));
+  const pdfUrl = (links && links.pdf) || ('/api/proposal.pdf?name=' + encodeURIComponent(file || ''));
+
   downloadEl.innerHTML = '';
   if (file) {
     const md = el('button', 'ghost', '下载 Markdown');
-    md.onclick = () => triggerDownload('/api/download?name=' + encodeURIComponent(file), file);
+    md.onclick = () => triggerDownload(mdUrl, file);
 
     // 优先让服务端转 PDF（服务器部署时浏览器打印不可用）；
     // 没装引擎就退回浏览器打印，并说清楚为什么。
@@ -649,8 +653,7 @@ function showResult(message, file) {
     if (state.pdfEngines && state.pdfEngines.length) {
       pdf.title = '服务端生成 · 引擎 ' + state.pdfEngines.join(' / ');
       pdf.onclick = () =>
-        triggerDownload('/api/proposal.pdf?name=' + encodeURIComponent(file),
-                        file.replace(/\.md$/, '.pdf'));
+        triggerDownload(pdfUrl, file.replace(/\.md$/, '.pdf'));
     } else {
       pdf.title = '服务端未安装 PDF 引擎，将用浏览器打印（可选「另存为 PDF」）';
       pdf.onclick = () => exportPdf(file.replace(/\.md$/, ''));
@@ -690,7 +693,7 @@ function handleEvent(ev) {
       break;
     case 'result':
       setBusy(false);
-      if (ev.message) showResult(ev.message, ev.file);
+      if (ev.message) showResult(ev.message, ev.file, ev.links);
       loadSessionsList();
       break;
     case 'error':
