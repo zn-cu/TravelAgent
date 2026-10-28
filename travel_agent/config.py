@@ -59,6 +59,12 @@ BUDGET_SERVER = PROJECT_ROOT / "mcp_server" / "server.py"
 MODEL = os.getenv("TRAVEL_MODEL", "deepseek:deepseek-chat")
 AMAP_MAPS_API_KEY = os.getenv("AMAP_MAPS_API_KEY", "").strip()
 
+# 访问口令（公网部署必填）。
+# 用应用自带的 Basic Auth，不依赖 Nginx/Caddy —— 服务器上 80/443 常被别的项目占着。
+# ACCESS_PASSWORD 为空时完全不鉴权，只适合本机调试。
+ACCESS_USER = os.getenv("ACCESS_USER", "").strip() or "admin"
+ACCESS_PASSWORD = os.getenv("ACCESS_PASSWORD", "").strip()
+
 # --------------------------------------------------------------------------- #
 # 阈值（都能在 .env 里改）
 # --------------------------------------------------------------------------- #
@@ -149,6 +155,10 @@ def check_env() -> list[str]:
         for k in ("DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROPIC_API_KEY", "GOOGLE_API_KEY")
     ):
         problems.append("没检测到任何模型 API Key（例如 DEEPSEEK_API_KEY）")
+    if not ACCESS_PASSWORD:
+        problems.append(
+            "没有设置 ACCESS_PASSWORD：接口没有任何鉴权，仅限本机使用；公网部署务必设置"
+        )
     if not BUDGET_SERVER.exists():
         problems.append(f"找不到预算 MCP server：{BUDGET_SERVER}")
     if not SKILLS_DIR.exists():

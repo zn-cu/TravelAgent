@@ -1,17 +1,28 @@
 #!/usr/bin/env bash
-# 一次性装好运行环境（Ubuntu 22.04 / 24.04，用 root 执行）
+# 一键装好运行环境（Ubuntu 22.04 / 24.04，用 root 执行）
 #
 #   sudo bash deploy/install.sh
 #
-# 假设项目已经放在 /opt/travel-agent（git clone 或 scp 上来都行）。
-# 脚本可以重复执行：已装过的步骤会跳过或原地更新。
-# 建议先自己过一遍：bash -n deploy/install.sh
+# 特点：**不装反代**（不碰 80/443，不影响服务器上已有的博客和其他项目）。
+# 应用直接监听 0.0.0.0:8080，鉴权由应用自带的 Basic Auth 负责。
+# 可重复执行：已装过的步骤会跳过。
+# 建议先自查语法：bash -n deploy/install.sh
 set -euo pipefail
 
 APP_DIR="${APP_DIR:-/opt/travel-agent}"
 APP_USER="${APP_USER:-travel}"
+APP_PORT="${APP_PORT:-8080}"
 
 step() { echo; echo "=== $* ==="; }
+
+step "0/6 端口检查（$APP_PORT 被占用的话换一个：APP_PORT=8090 sudo bash deploy/install.sh）"
+if command -v ss >/dev/null 2>&1 && ss -lntp 2>/dev/null | grep -q ":${APP_PORT} "; then
+  echo "⚠ 端口 $APP_PORT 已被占用："
+  ss -lntp | grep ":${APP_PORT} "
+  echo "  换端口重跑：APP_PORT=8090 sudo bash deploy/install.sh"
+  exit 1
+fi
+echo "端口 $APP_PORT 空闲"
 
 step "1/6 系统包：中文字体 + PDF 渲染依赖"
 apt-get update
@@ -19,20 +30,9 @@ apt-get install -y --no-install-recommends \
   python3 python3-venv python3-pip \
   libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 shared-mime-info \
   fonts-noto-cjk \
-  curl ca-certificates gnupg
+  curl ca-certificates
 # libpango* / libgdk-pixbuf* 是 WeasyPrint 的运行时依赖
 # fonts-noto-cjk 决定 PDF 里的中文是正常汉字还是方块
-
-step "1.5/6 Caddy（用官方源，Ubuntu 自带版本偏旧、有的镜像还没开 universe）"
-if ! command -v caddy >/dev/null 2>&1; then
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-    | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-    > /etc/apt/sources.list.d/caddy-stable.list
-  apt-get update
-  apt-get install -y --no-install-recommends caddy
-fi
-caddy version
 
 step "2/6 Node.js 22（12306 MCP 要求 ≥22，apt 仓库默认只给 18）"
 NEED_NODE=1
@@ -48,7 +48,6 @@ node -v
 npm -v
 
 step "3/6 预装 12306 MCP（省掉每次启动的 npx 下载）"
-# 装了全局命令后，config.py 会优先直接调用它（启动从数秒降到几十毫秒）
 if npm install -g 12306-mcp && command -v 12306-mcp >/dev/null 2>&1; then
   echo "已安装：$(command -v 12306-mcp)"
 else
@@ -76,22 +75,26 @@ fi
 
 step "6/6 安装并启动 systemd 服务"
 if [ ! -f "$APP_DIR/.env" ]; then
-  echo "缺少 $APP_DIR/.env —— 先复制并填写密钥："
+  echo "缺少 $APP_DIR/.env —— 先复制并填写："
   echo "  cp $APP_DIR/.env.example $APP_DIR/.env && nano $APP_DIR/.env"
+  echo "  至少要填 DEEPSEEK_API_KEY、AMAP_MAPS_API_KEY、ACCESS_PASSWORD"
   exit 1
 fi
-install -m 644 "$APP_DIR/deploy/travel-agent.service" /etc/systemd/system/travel-agent.service
+# 用当前端口渲染 unit 文件（避免手改）
+sed "s/--port [0-9]*/--port ${APP_PORT}/" \
+  "$APP_DIR/deploy/travel-agent.service" > /etc/systemd/system/travel-agent.service
 systemctl daemon-reload
 systemctl enable --now travel-agent
 
-# 防火墙：只放 Caddy 的 80/443。应用自己的 8000 只监听 127.0.0.1，不对外。
+# 防火墙放通应用端口（云厂商的安全组还要单独放一次，见 deploy/README.md）
 if command -v ufw >/dev/null 2>&1; then
-  ufw allow 80/tcp || true
-  ufw allow 443/tcp || true
+  ufw allow "${APP_PORT}/tcp" || true
 fi
 
 echo
-echo "安装完成。接下来："
-echo "  1) 配 Caddy（反代 + 账号密码）：见 deploy/README.md 第 4 步"
-echo "  2) systemctl status travel-agent --no-pager"
-echo "  3) journalctl -u travel-agent -f      # 看实时日志"
+echo "安装完成。访问地址：http://<服务器公网IP>:${APP_PORT}"
+echo "别忘了在云控制台的安全组/防火墙里放通 TCP ${APP_PORT}，否则外面连不上。"
+echo
+echo "查看状态："
+echo "  systemctl status travel-agent --no-pager"
+echo "  journalctl -u travel-agent -f"

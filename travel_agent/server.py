@@ -28,7 +28,7 @@ from fastapi.responses import FileResponse, StreamingResponse
 from langgraph.types import Command
 from pydantic import BaseModel
 
-from . import config
+from . import auth, config
 from .agent import build_ceo_agent
 from .mcp_gateway import open_toolbox
 from .store import DEFAULT_TITLE, new_session
@@ -59,11 +59,26 @@ async def lifespan(app: FastAPI):
         app.state.agent = build_ceo_agent(box)
         app.state.store = make_store()
         app.state.locks = {}
-        print("就绪：http://127.0.0.1:8000", flush=True)
+        print("就绪。", flush=True)
         yield
 
 
 app = FastAPI(title="智能旅游规划 Agent", lifespan=lifespan)
+
+# 访问口令：走应用自带的 Basic Auth，不依赖反代（服务器的 80/443 常被别的项目占着）
+if config.ACCESS_PASSWORD:
+    app.add_middleware(
+        auth.BasicAuthMiddleware,
+        username=config.ACCESS_USER,
+        password=config.ACCESS_PASSWORD,
+    )
+    print(f"已启用访问口令：用户名 {config.ACCESS_USER}", flush=True)
+else:
+    print(
+        "⚠ 未设置 ACCESS_PASSWORD：接口没有任何鉴权。"
+        "仅限本机使用；公网部署请在 .env 里设好再启动。",
+        flush=True,
+    )
 
 
 def _lock_for(session_id: str) -> asyncio.Lock:

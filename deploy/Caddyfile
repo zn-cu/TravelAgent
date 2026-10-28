@@ -1,9 +1,15 @@
-# Caddyfile —— 对外唯一入口：HTTPS + 一个共享账号 + 不缓冲的流式转发
+# Caddyfile —— 【可选】仅当你打算给这个项目上域名 / HTTPS 时才需要。
+#
+# 默认部署（deploy/install.sh）**不装反代**：应用直接监听 8080，
+# 鉴权由应用自带的 Basic Auth 负责（.env 里的 ACCESS_USER / ACCESS_PASSWORD）。
+#
+# ⚠️ 装它之前先确认 80/443 没被别的项目（比如你的博客）占着，
+#    或者把下面的站点地址改成别的端口。
 #
 # 安装位置：/etc/caddy/Caddyfile
 # 站点地址从环境变量 SITE_ADDRESS 读（见 /etc/caddy/environment）：
 #   有域名   → SITE_ADDRESS=travel.zncu.xin    （自动申请 Let's Encrypt 证书，自动续期）
-#   只有 IP  → SITE_ADDRESS=:80                （纯 HTTP，密码明文传输，只适合临时试用）
+#   只有 IP  → SITE_ADDRESS=:8443              （配 tls internal 用自签证书）
 #
 # 改完执行：systemctl reload caddy
 

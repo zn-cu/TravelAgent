@@ -301,24 +301,27 @@ python -m unittest discover tests -v
 
 ## 部署
 
-**推荐原生部署**（systemd + Caddy），4 核 4G 的机器足够，而且没有 Docker 那一层的心智负担：
+**原生部署（systemd），不用 Docker、不用反代**，4 核 4G 足够：
 
 ```
-公网 ──▶ Caddy(80/443，HTTPS + 账号密码) ──▶ uvicorn(8000，只绑 127.0.0.1) ──▶ Agent
+朋友浏览器 ──▶ http://<公网IP>:8080 ──▶ systemd: travel_agent.server（单进程，自带账号密码）
 ```
 
-完整步骤、防火墙、口令配置、常见故障见 **[deploy/README.md](deploy/README.md)**。四件事必须做到：
+不占 80/443，所以和服务器上已有的博客、其他项目**互不干扰**。
+完整步骤（端口检查、云安全组、口令配置、Redis、故障排查）见 **[deploy/README.md](deploy/README.md)**。
 
-| # | 为什么 |
-|---|---|
-| 反代加**账号密码** | 应用本身没有任何鉴权，公网裸奔等于把 API 额度送人 |
-| 应用只绑 `127.0.0.1` | 绕不过 Caddy，鉴权才有效 |
-| **单进程**（不加 `--workers`） | HITL 中断状态在进程内存里，多进程会让"确认"随机失效 |
-| 反代**关缓冲 + 长超时** | 否则前端流式日志卡住不动，且 1~3 分钟的单轮会被 504 掐断 |
+四件事必须在部署时做到：
 
-Docker 也支持（`Dockerfile` 里 Node 22 和中文字体都装好了），但记得把 `output/` 挂成 volume。
+| # | 为什么 | 落在哪 |
+|---|---|---|
+| 设 `ACCESS_PASSWORD` | 应用自带 Basic Auth；不设就是裸奔，谁的能拿你额度烧钱 | `travel_agent/auth.py` + `.env` |
+| **单进程**（不加 `--workers`） | HITL 中断状态在进程内存里，多进程会让"确认"随机失效 | `deploy/travel-agent.service` |
+| 云安全组放通应用端口 | 只在服务器里开 ufw 不够 | 云控制台 |
+| 生成的文件要留得住 | 原生部署天然满足（`/opt/travel-agent/output`） | 无需额外操作 |
 
-**上线前必做**：把 `AMAP_MAPS_API_KEY` 换成正式申请的新 key，`.env` 不要进版本库。
+想上 HTTPS 时再加一层反代（自签或域名），见 `deploy/README.md` 的附录。
+
+**上线前必做**：把 `AMAP_MAPS_API_KEY` 换成正式申请的新 key；`.env` 不进版本库。
 
 ---
 
