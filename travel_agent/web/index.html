@@ -1,0 +1,790 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>智能旅游规划 Agent</title>
+<style>
+  :root{
+    --bg:#0f1115; --panel:#161a21; --panel2:#1d222b; --line:#2a313d;
+    --text:#e6e8ee; --muted:#8b95a7; --accent:#4f8cff;
+    --ok:#3fb950; --warn:#d29922; --err:#f85149;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%}
+  body{margin:0;background:var(--bg);color:var(--text);
+       font:14px/1.6 "Segoe UI","Microsoft YaHei",system-ui,sans-serif;overflow:hidden}
+  button{font:inherit;cursor:pointer;border:none;border-radius:8px;background:var(--accent);color:#fff}
+  button:disabled{opacity:.4;cursor:not-allowed}
+  button.ghost{background:var(--panel2);color:var(--text);border:1px solid var(--line)}
+  button.danger{background:#3a1d1d;border:1px solid #6b2b2b;color:#ffb4ae}
+
+  .app{display:grid;grid-template-columns:230px 1fr;height:100%}
+  @media (max-width:820px){ .app{grid-template-columns:1fr} .sidebar{display:none} }
+
+  /* ---------- 侧栏 ---------- */
+  .sidebar{display:flex;flex-direction:column;border-right:1px solid var(--line);background:var(--panel);min-height:0}
+  .sidebar .brand{padding:14px 14px 10px;font-size:13px;font-weight:600;letter-spacing:.02em}
+  .sidebar .brand span{display:block;font-size:11px;color:var(--muted);font-weight:400;margin-top:2px}
+  #new{width:calc(100% - 24px);margin:0 12px 10px;padding:7px 0;font-size:13px}
+  #sessions{flex:1;overflow-y:auto;padding:0 8px 8px;display:flex;flex-direction:column;gap:4px}
+  .sess{display:flex;align-items:center;gap:8px;padding:7px 9px;border-radius:8px;cursor:pointer;
+        font-size:12.5px;color:#c3cbd9;border:1px solid transparent}
+  .sess:hover{background:var(--panel2)}
+  .sess.active{background:#1b2433;border-color:#2b3a55;color:#fff}
+  .sess .t{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sess .del{opacity:0;color:var(--muted);font-size:15px;padding:0 4px;background:none}
+  .sess:hover .del{opacity:1}
+  .sess .st{width:6px;height:6px;border-radius:50%;background:var(--muted);flex:none}
+  .sess .st.done{background:var(--ok)} .sess .st.waiting{background:var(--warn)}
+  .sess .st.error{background:var(--err)} .sess .st.running{background:var(--accent)}
+  .sidebar .foot{padding:8px 14px;border-top:1px solid var(--line);font-size:11px;color:var(--muted)}
+
+  /* ---------- 主区 ---------- */
+  main{display:flex;flex-direction:column;min-width:0;min-height:0}
+  .topbar{display:flex;align-items:center;gap:10px;padding:11px 20px;border-bottom:1px solid var(--line)}
+  .topbar h1{margin:0;font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;cursor:text}
+  .topbar #rename{padding:1px 7px;font-size:12px;color:var(--muted)}
+  .topbar #rename:hover{color:var(--text)}
+  .topbar .badge{font-size:11px;color:var(--muted);border:1px solid var(--line);border-radius:99px;padding:2px 9px;flex:none}
+  #scroll{flex:1;overflow-y:auto;padding:16px 20px 8px;display:flex;flex-direction:column;gap:12px}
+
+  /* ---------- 阶段日志 ---------- */
+  .logbox{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:10px 14px}
+  .logbox .caption{font-size:11px;color:var(--muted);margin-bottom:6px;letter-spacing:.03em}
+  #log{display:flex;flex-direction:column;gap:2px}
+  .step{display:flex;align-items:baseline;gap:8px;font-size:13px;padding:3px 0;color:#c9d3e3}
+  .step .ico{width:12px;flex:none;text-align:center;font-size:10px;color:var(--muted)}
+  .step .who{flex:none;color:#8ea8d0;font-size:12px}
+  .step .what{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .step .ms{flex:none;color:var(--muted);font-size:11px;font-variant-numeric:tabular-nums}
+  .step.running .ico{color:var(--accent)}
+  .step.ok .ico{color:var(--ok)}
+  .step.err .ico{color:var(--err)} .step.err .what{color:#ffb4ae}
+  .step.handoff .what{color:#b9c8e6}
+  .step.handoff .who{color:#c9a227}
+  .step .count{flex:none;color:var(--accent);font-size:11px}
+
+  /* ---------- 结果 ---------- */
+  .result{border:1px solid var(--line);border-radius:10px;background:var(--panel);padding:14px 18px}
+  .result .caption{font-size:11px;color:var(--muted);margin-bottom:8px}
+  .result h1,.result h2,.result h3{margin:14px 0 6px;line-height:1.35}
+  .result h1{font-size:19px} .result h2{font-size:16px} .result h3{font-size:14px;color:#c9d3e3}
+  .result table{border-collapse:collapse;margin:8px 0;font-size:13px;width:100%}
+  .result th,.result td{border:1px solid var(--line);padding:4px 8px;text-align:left}
+  .result th{background:var(--panel2)}
+  .result ul,.result ol{margin:6px 0 6px 20px;padding:0}
+  .result code{background:#0b0e13;padding:1px 5px;border-radius:4px;font-size:12.5px}
+  .result a{color:var(--accent);word-break:break-all}
+  .result blockquote{margin:8px 0;padding:6px 12px;border-left:3px solid var(--line);
+                     color:#a9b6c9;background:#12161d;border-radius:0 6px 6px 0}
+  .result .dl{margin-top:12px;font-size:12.5px;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .result .dl button{padding:4px 13px;font-size:12.5px}
+  .result .dl .hint{font-size:11.5px;color:var(--muted)}
+
+  /* ---------- HITL ---------- */
+  .card{border:1px solid #3a4a6b;background:#141b26;border-radius:10px;padding:12px 16px}
+  .card .title{font-size:13px;font-weight:600;color:#bcd2ff;margin-bottom:6px}
+  .card pre{margin:6px 0;background:#0b0e13;border:1px solid var(--line);border-radius:6px;
+            padding:8px;font-size:11.5px;max-height:220px;overflow:auto;white-space:pre-wrap;
+            word-break:break-word;font-family:ui-monospace,Consolas,monospace}
+  .card .fields{margin:4px 0;font-size:13px;line-height:1.75}
+  .card .fields h1,.card .fields h2,.card .fields h3{font-size:13.5px;margin:10px 0 4px;color:#dbe6ff}
+  .card .fields table{border-collapse:collapse;margin:6px 0;font-size:12.5px;width:100%}
+  .card .fields th,.card .fields td{border:1px solid var(--line);padding:3px 7px;text-align:left}
+  .card .fields ul,.card .fields ol{margin:4px 0 4px 18px}
+  .card .kv{display:flex;gap:10px;margin:3px 0}
+  .card .kv .k{color:var(--muted);flex:none;min-width:72px}
+  .card .kv .v{flex:1;word-break:break-word}
+  .card .raw{margin-top:8px}
+  .card .raw summary{cursor:pointer;color:var(--muted);font-size:11.5px;user-select:none}
+  .proto{background:#0b0e13;padding:1px 5px;border-radius:4px;font-size:12px;word-break:break-all}
+  .card .row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .card .row button{padding:5px 14px;font-size:12.5px}
+  .card .edit{display:none;margin-top:8px}
+  .card .edit.show{display:block}
+  .card .edit textarea{width:100%;height:110px;font-family:ui-monospace,Consolas,monospace;font-size:12px;
+                       background:var(--panel2);color:var(--text);border:1px solid var(--line);border-radius:6px;padding:6px}
+  .card.decided .row{display:none}
+  .card .chosen{display:none;color:var(--ok);font-size:12px;margin-top:6px}
+  .card.decided .chosen{display:block}
+
+  .hint{color:var(--muted);font-size:12.5px}
+
+  /* ---------- 输入 ---------- */
+  form{display:flex;gap:8px;padding:12px 20px;border-top:1px solid var(--line);background:var(--panel)}
+  textarea{flex:1;resize:none;height:52px;background:var(--panel2);color:var(--text);
+           border:1px solid var(--line);border-radius:8px;padding:8px 10px;font:inherit}
+  textarea:focus{outline:none;border-color:var(--accent)}
+  form button{padding:0 20px}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="sidebar">
+    <div class="brand">智能旅游规划<span>MCP · Skills · deepagents</span></div>
+    <button id="new">+ 新会话</button>
+    <div id="sessions"></div>
+    <div class="foot" id="foot">连接中…</div>
+  </aside>
+
+  <main>
+    <div class="topbar">
+      <h1 id="title">新会话</h1>
+      <button id="rename" class="ghost" title="重命名会话">✎</button>
+      <span class="badge" id="status">就绪</span>
+    </div>
+
+    <div id="scroll">
+      <div class="logbox" id="logbox" style="display:none">
+        <div class="caption">执行流程</div>
+        <div id="log"></div>
+      </div>
+      <div id="cards"></div>
+      <div class="result" id="result" style="display:none">
+        <div class="caption">最终方案</div>
+        <div id="result-body"></div>
+        <div class="dl" id="download"></div>
+      </div>
+      <div class="hint" id="empty">
+        说明需求开始规划，例如：<b>我想去成都玩3天，从西安出发，2 个人，预算 3000</b><br>
+        左侧可以新开会话，每个会话的过程和结果都会各自保留。
+      </div>
+    </div>
+
+    <form id="composer">
+      <textarea id="input" spellcheck="false" autocorrect="off" autocomplete="off"
+                placeholder="说说你的旅行需求（Enter 发送，Shift+Enter 换行）"></textarea>
+      <button id="send" type="submit">发送</button>
+    </form>
+  </main>
+</div>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const sessionsEl = $('#sessions');
+const logEl = $('#log');
+const logBox = $('#logbox');
+const cardsEl = $('#cards');
+const resultBox = $('#result');
+const resultBody = $('#result-body');
+const downloadEl = $('#download');
+const titleEl = $('#title');
+const statusEl = $('#status');
+const emptyEl = $('#empty');
+const inputEl = $('#input');
+const sendEl = $('#send');
+
+const state = {
+  sessionId: null,
+  sessions: [],
+  steps: new Map(),   // step id -> 行元素
+  pending: [],        // HITL 待决策
+  busy: false,
+  pdfEngines: [],     // 服务端可用的 PDF 引擎（空数组就退回浏览器打印）
+};
+
+function el(tag, cls, text) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (text != null) node.textContent = text;
+  return node;
+}
+function scrollDown() {
+  // 合并到下一帧再滚，避免流式事件密集时每来一条就触发布局重排
+  // （重排会让输入法的候选窗位置反复计算，中文输入时表现为闪烁）
+  if (scrollDown.pending) return;
+  scrollDown.pending = true;
+  requestAnimationFrame(() => {
+    scrollDown.pending = false;
+    const s = $('#scroll');
+    s.scrollTop = s.scrollHeight;
+  });
+}
+
+/* ---------------------- 极简 markdown 渲染 ---------------------- */
+function escapeHtml(s) {
+  return s.replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+}
+function inline(s) {
+  let out = escapeHtml(s);
+  // 先把 amapuri:// 这种 App 私有协议标出来：它不是链接，浏览器点了没反应，
+  // 硬做成 <a> 只会让人以为坏了。
+  out = out.replace(/amapuri:\/\/[^\s<)）】]+/g, m => `<code class="proto">${m}</code>`);
+  // 裸 https 链接自动可点
+  out = out.replace(
+    /(^|[\s(（>])(https?:\/\/[^\s<)）】]+)/g,
+    (m, pre, url) => `${pre}<a href="${url}" target="_blank" rel="noopener">${url}</a>`
+  );
+  out = out.replace(
+    /\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
+    '<a href="$2" target="_blank" rel="noopener">$1</a>'
+  );
+  out = out.replace(/`([^`]+)`/g, '<code>$1</code>');
+  out = out.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  return out;
+}
+function renderMarkdown(src) {
+  const lines = src.split('\n');
+  const out = [];
+  let i = 0;
+  const isRow = (s) => /^\s*\|.*\|\s*$/.test(s);
+  while (i < lines.length) {
+    const line = lines[i];
+    if (isRow(line)) {
+      const rows = [];
+      while (i < lines.length && isRow(lines[i])) rows.push(lines[i++]);
+      const cells = r => r.trim().replace(/^\||\|$/g, '').split('|').map(c => c.trim());
+      const divider = r => /^[\s|:-]+$/.test(r);
+      let html = '<table>';
+      rows.forEach((r, idx) => {
+        if (divider(r)) return;
+        const tag = idx === 0 ? 'th' : 'td';
+        html += '<tr>' + cells(r).map(c => `<${tag}>${inline(c)}</${tag}>`).join('') + '</tr>';
+      });
+      out.push(html + '</table>');
+      continue;
+    }
+    const h = /^(#{1,3})\s+(.*)$/.exec(line);
+    if (h) { out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); i++; continue; }
+    if (/^\s*>/.test(line)) {
+      const quoted = [];
+      while (i < lines.length && /^\s*>/.test(lines[i])) quoted.push(lines[i++].replace(/^\s*>\s?/, '').trim());
+      out.push('<blockquote>' + quoted.filter(Boolean).map(inline).join('<br>') + '</blockquote>');
+      continue;
+    }
+    if (/^\s*[-*]\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*[-*]\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*[-*]\s+/, ''));
+      out.push('<ul>' + items.map(t => `<li>${inline(t)}</li>`).join('') + '</ul>');
+      continue;
+    }
+    if (/^\s*\d+\.\s+/.test(line)) {
+      const items = [];
+      while (i < lines.length && /^\s*\d+\.\s+/.test(lines[i])) items.push(lines[i++].replace(/^\s*\d+\.\s+/, ''));
+      out.push('<ol>' + items.map(t => `<li>${inline(t)}</li>`).join('') + '</ol>');
+      continue;
+    }
+    if (!line.trim()) { i++; continue; }
+    const para = [];
+    while (i < lines.length && lines[i].trim() && !/^\s*[|#>]|^\s*[-*]\s|^\s*\d+\.\s/.test(lines[i])) {
+      para.push(lines[i++]);
+    }
+    out.push('<p>' + inline(para.join(' ')) + '</p>');
+  }
+  return out.join('');
+}
+
+/* ---------------------- 步骤日志 ---------------------- */
+function fmtMs(ms) {
+  const value = Number(ms) || 0;
+  return value >= 1000 ? (value / 1000).toFixed(1) + 's' : Math.round(value) + 'ms';
+}
+
+function paintStep(row, step) {
+  const isOk = step.status === 'ok';
+  const isErr = step.status === 'error';
+  row.className = 'step ' + (step.kind || 'tool')
+    + (step.status === 'running' ? ' running' : isErr ? ' err' : isOk ? ' ok' : '');
+  row.querySelector('.ico').textContent = isErr ? '✗' : isOk ? '✓' : '●';
+  if (step.agent) row.querySelector('.who').textContent = step.agent;
+  if (step.label) row.querySelector('.what').textContent = step.label;
+  if (step.ms != null) {
+    row.dataset.ms = String(Number(step.ms) || 0);
+    row.querySelector('.ms').textContent = fmtMs(step.ms);
+  }
+}
+
+/**
+ * 连续相同的动作合并成一行（×N）。
+ * 真实跑一次会连着调七八次「查景点详情」，一条条铺出来只是噪音。
+ */
+function mergeWithPrevious(row) {
+  const prev = row.previousElementSibling;
+  if (!prev || prev.dataset.key !== row.dataset.key) return;
+  if (prev.classList.contains('running') || prev.classList.contains('err')) return;
+
+  const count = parseInt(prev.dataset.count || '1', 10) + parseInt(row.dataset.count || '1', 10);
+  const ms = (parseFloat(prev.dataset.ms) || 0) + (parseFloat(row.dataset.ms) || 0);
+
+  prev.dataset.count = String(count);
+  prev.dataset.ms = String(ms);
+  prev.querySelector('.count').textContent = '×' + count;
+  prev.querySelector('.ms').textContent = fmtMs(ms);
+
+  // 把被合并掉的 id 都指向留下来的那一行，后续事件还能更新它
+  for (const [id, node] of state.steps) if (node === row) state.steps.set(id, prev);
+  row.remove();
+}
+
+function renderStep(step) {
+  let row = state.steps.get(step.id);
+  if (!row) {
+    row = el('div', 'step');
+    row.innerHTML = '<span class="ico"></span><span class="who"></span>'
+                  + '<span class="what"></span><span class="count"></span>'
+                  + '<span class="ms"></span>';
+    row.dataset.key = [step.agent || '', step.kind || '', step.label || ''].join('|');
+    row.dataset.count = '1';
+    row.dataset.ms = '0';
+    state.steps.set(step.id, row);
+    logEl.appendChild(row);
+  }
+  paintStep(row, step);
+  if (step.status && step.status !== 'running') mergeWithPrevious(row);
+
+  logBox.style.display = '';
+  emptyEl.style.display = 'none';
+  scrollDown();
+}
+
+function loadLog(steps) {
+  logEl.innerHTML = '';
+  state.steps.clear();
+  (steps || []).forEach(renderStep);
+  if (!steps || !steps.length) logBox.style.display = 'none';
+}
+
+/* ---------------------- HITL ---------------------- */
+// 参数名 → 人话。HITL 卡片上直接甩 JSON 是给开发者看的，不是给用户看的。
+const FIELD_LABELS = {
+  summary: '方案要点',
+  order_summary: '订单内容',
+  total_price: '总价（元）',
+  items: '消费清单',
+  plan: '方案',
+  message: '说明',
+  reason: '说明',
+};
+const ACTION_TITLES = {
+  confirm_itinerary: '请确认这份方案',
+  book_hold: '是否现在锁单？',
+};
+
+/** 把工具参数渲染成人能读的样子：长文本走 markdown，其余按字段名逐条列。 */
+function renderActionBody(action) {
+  const args = action.args || {};
+  const keys = Object.keys(args);
+  const box = el('div', 'fields');
+
+  if (!keys.length) {
+    box.appendChild(el('div', 'kv')).appendChild(el('span', 'v', '（无参数）'));
+    return box;
+  }
+
+  // 只有一个长文本参数（confirm_itinerary 就是这种）→ 直接整段渲染成正文
+  const longText = keys.filter(k => typeof args[k] === 'string' && args[k].length > 40);
+  if (longText.length === 1 && keys.length === 1) {
+    box.innerHTML = renderMarkdown(args[longText[0]]);
+    return box;
+  }
+
+  keys.forEach(key => {
+    const value = args[key];
+    const line = el('div', 'kv');
+    line.appendChild(el('span', 'k', FIELD_LABELS[key] || key));
+    const cell = el('span', 'v');
+    if (typeof value === 'string' && value.includes('\n')) cell.innerHTML = renderMarkdown(value);
+    else if (typeof value === 'string') cell.textContent = value;
+    else cell.textContent = JSON.stringify(value);
+    line.appendChild(cell);
+    box.appendChild(line);
+  });
+  return box;
+}
+
+function submitDecisions() {
+  const decisions = state.pending.map(p => p.decision);
+  if (decisions.some(d => !d)) return;
+  const sid = state.sessionId;
+  state.pending = [];
+  cardsEl.innerHTML = '';
+  streamRequest(`/api/sessions/${sid}/resume`, { decisions });
+}
+
+function renderPending(items) {
+  cardsEl.innerHTML = '';
+  state.pending = [];
+
+  (items || []).forEach(item => {
+    (item.actions || []).forEach(action => {
+      const idx = state.pending.length;
+      state.pending.push({ decision: null });
+
+      const card = el('div', 'card');
+      card.appendChild(
+        el('div', 'title', ACTION_TITLES[action.raw_name] || ('请确认这一步：' + action.name))
+      );
+      card.appendChild(renderActionBody(action));
+
+      // 想看原始参数的可以展开（默认收起）
+      const raw = el('details', 'raw');
+      raw.appendChild(el('summary', null, '查看原始参数'));
+      raw.appendChild(el('pre', null, JSON.stringify(action.args || {}, null, 2)));
+      card.appendChild(raw);
+
+      const row = el('div', 'row');
+      const chosen = el('div', 'chosen');
+
+      const decide = (decision, label) => {
+        state.pending[idx].decision = decision;
+        card.classList.add('decided');
+        chosen.textContent = '已选择：' + label;
+        if (state.pending.every(p => p.decision)) submitDecisions();
+      };
+
+      (action.allowed || ['approve', 'reject']).forEach(kind => {
+        const btn = el('button', kind === 'reject' ? 'danger' : '');
+        btn.textContent = { approve: '通过', edit: '修改参数', reject: '否决' }[kind] || kind;
+        if (kind === 'edit') {
+          btn.onclick = () => editBox.classList.add('show');
+        } else if (kind === 'reject') {
+          btn.onclick = () => {
+            const reason = prompt('否决理由（会原样转告模型）', '这一步不合适，请换个方案');
+            if (reason === null) return;
+            decide({ type: 'reject', message: reason || '用户否决了这一步。' }, '否决');
+          };
+        } else {
+          btn.onclick = () => decide({ type: 'approve' }, '通过');
+        }
+        row.appendChild(btn);
+      });
+
+      const editBox = el('div', 'edit');
+      const editArea = el('textarea');
+      editArea.value = JSON.stringify(action.args || {}, null, 2);
+      const editOk = el('button', 'ghost', '确认修改');
+      editOk.onclick = () => {
+        try {
+          const args = JSON.parse(editArea.value);
+          decide({ type: 'edit', edited_action: { name: action.raw_name || action.name, args } }, '修改参数');
+          editBox.classList.remove('show');
+        } catch (err) {
+          alert('JSON 格式不对：' + err.message);
+        }
+      };
+      editBox.append(editArea, editOk);
+
+      card.append(row, editBox, chosen);
+      cardsEl.appendChild(card);
+    });
+  });
+
+  setStatus('waiting');
+  setBusy(false);   // 卡片可点，但输入框保持禁用直到决策提交
+  inputEl.disabled = true;
+  sendEl.disabled = true;
+  scrollDown();
+}
+
+/* ---------------------- 会话列表 ---------------------- */
+function fmtTime(ts) {
+  const d = new Date((ts || 0) * 1000);
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+}
+
+function renderSessions() {
+  sessionsEl.innerHTML = '';
+  state.sessions.forEach(s => {
+    const row = el('div', 'sess' + (s.id === state.sessionId ? ' active' : ''));
+    const dot = el('span', 'st ' + (s.status || 'idle'));
+    const title = el('span', 't', s.title || '新会话');
+    const when = el('span', 'ms', fmtTime(s.updated_at));
+    when.style.fontSize = '10.5px';
+    when.style.color = 'var(--muted)';
+    const del = el('button', 'del', '×');
+    del.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm('删除这个会话？')) return;
+      await fetch(`/api/sessions/${s.id}`, { method: 'DELETE' });
+      if (s.id === state.sessionId) { state.sessionId = null; }
+      await loadSessions(true);
+    };
+    row.append(dot, title, when, del);
+    row.onclick = () => selectSession(s.id);
+    sessionsEl.appendChild(row);
+  });
+}
+
+async function loadSessions(keepSelection) {
+  const res = await fetch('/api/sessions');
+  const data = await res.json();
+  state.sessions = data.sessions || [];
+
+  if (!state.sessions.length) {
+    await createSession();
+    return;
+  }
+  if (!keepSelection || !state.sessions.some(s => s.id === state.sessionId)) {
+    await selectSession(state.sessions[0].id);
+  } else {
+    renderSessions();
+  }
+}
+
+async function createSession() {
+  const res = await fetch('/api/sessions', { method: 'POST' });
+  const data = await res.json();
+  state.sessionId = data.id;
+  await loadSessionsList();
+  await selectSession(data.id);
+  inputEl.focus();
+}
+
+async function loadSessionsList() {
+  const res = await fetch('/api/sessions');
+  state.sessions = (await res.json()).sessions || [];
+  renderSessions();
+}
+
+async function selectSession(id) {
+  const res = await fetch(`/api/sessions/${id}`);
+  if (!res.ok) { await loadSessionsList(); return; }
+  const session = await res.json();
+
+  state.sessionId = session.id;
+  state.steps.clear();
+  cardsEl.innerHTML = '';
+  state.pending = [];
+
+  titleEl.textContent = session.title || '新会话';
+  loadLog(session.log);
+  setStatus(session.status);
+
+  if (session.result && session.result.message) {
+    showResult(session.result.message, session.result.file);
+  } else {
+    resultBox.style.display = 'none';
+  }
+  if (session.pending && session.pending.length) {
+    renderPending(session.pending);
+  } else {
+    setBusy(false);
+  }
+
+  renderSessions();
+}
+
+/* ---------------------- 状态与结果 ---------------------- */
+function setStatus(status) {
+  const map = { idle: '就绪', running: '执行中…', waiting: '等你确认', done: '已完成', error: '出错' };
+  statusEl.textContent = map[status] || status || '就绪';
+}
+
+function setBusy(busy) {
+  state.busy = busy;
+  inputEl.disabled = busy;
+  sendEl.disabled = busy;
+  if (!busy) inputEl.focus();
+  if (busy) setStatus('running');
+}
+
+/* 导出 PDF：直接开打印窗口，让浏览器「另存为 PDF」。
+   为什么不用后端生成 PDF：中文 PDF 最大的坑是字体嵌入，装 reportlab + 找字体
+   又是一堆依赖；浏览器打印零依赖、版式所见即所得。 */
+const PRINT_CSS = `
+  *{box-sizing:border-box}
+  body{font:12.5pt/1.75 "Microsoft YaHei","PingFang SC",system-ui,sans-serif;color:#111;background:#fff;margin:0}
+  h1{font-size:20pt;margin:0 0 10px} h2{font-size:15pt;margin:20px 0 8px}
+  h3{font-size:13pt;margin:14px 0 6px}
+  table{border-collapse:collapse;width:100%;margin:8px 0;font-size:10.5pt}
+  th,td{border:1px solid #999;padding:4px 8px;text-align:left;vertical-align:top}
+  th{background:#f0f0f0}
+  code{background:#f4f4f4;padding:0 3px;border-radius:3px;font-size:11pt}
+  blockquote{border-left:3px solid #ccc;margin:8px 0;padding:2px 10px;color:#444}
+  a{color:#0b57d0;word-break:break-all;text-decoration:none}
+  ul,ol{margin:6px 0 6px 20px} li{margin:2px 0}
+  @page{margin:16mm}
+`;
+
+function exportPdf(title) {
+  const win = window.open('', '_blank');
+  if (!win) {
+    alert('浏览器拦截了新窗口，请允许弹窗后重试');
+    return;
+  }
+  win.document.write(
+    `<!doctype html><html lang="zh-CN"><head><meta charset="utf-8">`
+    + `<title>${title || '旅游策划书'}</title><style>${PRINT_CSS}</style></head>`
+    + `<body>${resultBody.innerHTML}</body></html>`
+  );
+  win.document.close();
+  win.focus();
+  // 等一帧再打印，否则偶发白页
+  setTimeout(() => win.print(), 300);
+}
+
+function showResult(message, file) {
+  resultBody.innerHTML = renderMarkdown(message || '');
+
+  // 「最终方案」这个标题只在真的产出策划书时才用，否则那只是一句回复
+  const caption = resultBox.querySelector('.caption');
+  if (caption) caption.textContent = file ? '最终方案' : '回复';
+
+  downloadEl.innerHTML = '';
+  if (file) {
+    const md = el('button', 'ghost', '下载 Markdown');
+    md.onclick = () => { window.location = '/api/download?name=' + encodeURIComponent(file); };
+
+    // 优先让服务端转 PDF（服务器部署时浏览器打印不可用）；
+    // 没装引擎就退回浏览器打印，并说清楚为什么。
+    const pdf = el('button', 'ghost', '导出 PDF');
+    if (state.pdfEngines && state.pdfEngines.length) {
+      pdf.title = '服务端生成 · 引擎 ' + state.pdfEngines.join(' / ');
+      pdf.onclick = () => {
+        window.location = '/api/proposal.pdf?name=' + encodeURIComponent(file);
+      };
+    } else {
+      pdf.title = '服务端未安装 PDF 引擎，将用浏览器打印（可选「另存为 PDF」）';
+      pdf.onclick = () => exportPdf(file.replace(/\.md$/, ''));
+    }
+
+    downloadEl.append(md, pdf, el('span', 'hint', file));
+  }
+
+  resultBox.style.display = '';
+  emptyEl.style.display = 'none';
+  setStatus('done');
+  scrollDown();
+}
+
+function addError(text) {
+  const box = el('div', 'result');
+  box.style.borderColor = '#6b2b2b';
+  box.appendChild(el('div', 'caption', '出错了'));
+  const p = el('div', null, text);
+  p.style.color = '#ffb4ae';
+  box.appendChild(p);
+  cardsEl.appendChild(box);
+  setStatus('error');
+  scrollDown();
+}
+
+/* ---------------------- 网络 ---------------------- */
+function handleEvent(ev) {
+  switch (ev.type) {
+    case 'step':
+      renderStep(ev);
+      break;
+    case 'interrupt':
+      renderPending(ev.items);
+      break;
+    case 'result':
+      setBusy(false);
+      if (ev.message) showResult(ev.message, ev.file);
+      loadSessionsList();
+      break;
+    case 'error':
+      setBusy(false);
+      addError(ev.message);
+      break;
+  }
+}
+
+async function consume(response) {
+  if (!response.ok || !response.body) {
+    let detail = '';
+    try { detail = (await response.json()).detail || ''; } catch { /* 忽略 */ }
+    setBusy(false);
+    addError(`请求被拒绝（${response.status}）${detail ? '：' + detail : ''}`);
+    return;
+  }
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder('utf-8');
+  let buffer = '';
+  while (true) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let idx;
+    while ((idx = buffer.indexOf('\n')) >= 0) {
+      const line = buffer.slice(0, idx).trim();
+      buffer = buffer.slice(idx + 1);
+      if (line) handleEvent(JSON.parse(line));
+    }
+  }
+}
+
+async function streamRequest(url, body) {
+  setBusy(true);
+  emptyEl.style.display = 'none';
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    await consume(res);
+  } catch (err) {
+    setBusy(false);
+    addError('网络错误：' + err.message);
+  }
+}
+
+/* ---------------------- 事件绑定 ---------------------- */
+$('#new').onclick = () => createSession();
+
+/* 会话重命名：双击标题，或点旁边的 ✎ */
+let composing = false;
+inputEl.addEventListener('compositionstart', () => { composing = true; });
+inputEl.addEventListener('compositionend', () => { composing = false; });
+
+async function renameSession() {
+  if (!state.sessionId) return;
+  const next = prompt('会话名称', titleEl.textContent);
+  if (next === null) return;
+  const title = next.trim();
+  if (!title) return;
+
+  const res = await fetch(`/api/sessions/${state.sessionId}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) { alert('改名失败'); return; }
+  titleEl.textContent = title;
+  await loadSessionsList();
+}
+$('#rename').onclick = renameSession;
+titleEl.title = '双击可以重命名';
+titleEl.addEventListener('dblclick', renameSession);
+
+$('#composer').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const text = inputEl.value.trim();
+  if (!text || state.busy || !state.sessionId) return;
+  inputEl.value = '';
+  // 新一轮：清空上一轮的日志与结果
+  state.steps.clear();
+  logEl.innerHTML = '';
+  resultBox.style.display = 'none';
+  if (titleEl.textContent === '新会话') titleEl.textContent = text.slice(0, 24);
+  streamRequest(`/api/sessions/${state.sessionId}/chat`, { message: text });
+  loadSessionsList();
+});
+
+inputEl.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || e.shiftKey) return;
+  // 中文输入法选词时按 Enter 是"确认候选词"，不是"发送"。
+  // 不判断的话会：① 把字吞掉 ② 输入法候选窗反复重算位置（表现为打字闪烁）
+  if (composing || e.isComposing || e.keyCode === 229) return;
+  e.preventDefault();
+  $('#composer').requestSubmit();
+});
+
+/* ---------------------- 启动 ---------------------- */
+(async function boot() {
+  try {
+    const health = await (await fetch('/api/health')).json();
+    state.pdfEngines = health.pdf_engines || [];
+    $('#foot').textContent = health.ok
+      ? `MCP ${health.tools} 个工具 · ${health.store || '内存'}`
+      : 'MCP 未就绪（看服务端日志）';
+  } catch {
+    $('#foot').textContent = '服务端未响应';
+  }
+  await loadSessions(false);
+})();
+</script>
+</body>
+</html>

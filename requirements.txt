@@ -1,0 +1,22 @@
+# 版本要钉死：deepagents 的 skills 参数是 0.7 之后才有的，
+# langchain 的 MCPAdapter（langchain.mcp）需要 1.4.0+。
+deepagents>=0.7
+langchain[mcp]>=1.4.0
+langchain-deepseek>=0.1
+python-dotenv>=1.0
+
+# 自研 MCP server 用的 FastMCP。
+# 注意：不要写 `mcp>=1.2` —— mcp 2.x 把 mcp.server.fastmcp 改名成了
+# mcp.server.mcpserver，API 也变了；用独立包 fastmcp 更稳（它随 langchain[mcp] 一起装）。
+fastmcp>=2.0
+
+# Web 界面（流式 NDJSON）
+fastapi>=0.110
+uvicorn>=0.29
+
+# 导出 PDF（Markdown → HTML → PDF）。markdown 是所有引擎共用的转换器。
+markdown>=3.5
+# 引擎任选其一（见 README「导出 PDF」一节）：
+#   跨平台 / 服务器推荐： pip install weasyprint
+#   纯 wheel，无系统库：   pip install xhtml2pdf
+#   Windows + 已装 Word：  pip install pywin32

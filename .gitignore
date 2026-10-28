@@ -1,0 +1,18 @@
+# 密钥与运行时产物
+.env
+logs/
+output/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# IDE
+.idea/
+.vscode/
+
+# 测试临时目录
+tests/_pdf_tmp/
+tests/_publish_tmp_*/

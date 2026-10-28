@@ -1,0 +1,8 @@
+# 统一换行符：仓库里一律 LF，Windows 检出也不会带 CRLF 差异
+* text=auto eol=lf
+
+# 二进制文件不做换行转换
+*.pdf binary
+*.png binary
+*.jpg binary
+*.ico binary
