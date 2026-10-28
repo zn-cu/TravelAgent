@@ -2,10 +2,15 @@
 #
 # 安装位置：/etc/caddy/Caddyfile
 # 站点地址从环境变量 SITE_ADDRESS 读（见 /etc/caddy/environment）：
-#   有域名   → SITE_ADDRESS=travel.example.com   （自动申请 Let's Encrypt 证书）
-#   只有 IP  → SITE_ADDRESS=:80                  （纯 HTTP，密码明文传输，只适合临时试用）
+#   有域名   → SITE_ADDRESS=travel.zncu.xin    （自动申请 Let's Encrypt 证书，自动续期）
+#   只有 IP  → SITE_ADDRESS=:80                （纯 HTTP，密码明文传输，只适合临时试用）
 #
 # 改完执行：systemctl reload caddy
+
+# 可选：填上邮箱，证书快到期时 Caddy 会发提醒
+# {
+# 	email you@example.com
+# }
 
 {$SITE_ADDRESS:localhost} {
 	encode zstd gzip

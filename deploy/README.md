@@ -63,15 +63,28 @@ caddy hash-password --plaintext 'sunlianwu'
 
 **再配站点地址**：
 
+有域名（推荐，自动 HTTPS）：
+
+```bash
+sudo mkdir -p /etc/caddy
+sudo tee /etc/caddy/environment >/dev/null <<'EOF'
+SITE_ADDRESS=travel.zncu.xin
+EOF
+```
+
+只有 IP（临时试用，密码明文传输）：
+
 ```bash
 sudo tee /etc/caddy/environment >/dev/null <<'EOF'
 SITE_ADDRESS=:80
 EOF
 ```
 
-> 有域名就把 `:80` 换成域名，例如 `SITE_ADDRESS=travel.example.com`，
-> Caddy 会自动申请证书、自动续期。**没有域名时就只能用 `:80`，此时密码是明文传输**，
-> 只适合临时给朋友试用。
+域名模式的前置条件（缺一个 Caddy 就签不出证书）：
+
+1. **DNS**：`travel.zncu.xin` 的 A 记录指向公网 IP（如 `49.232.174.53`），用 `dig +short travel.zncu.xin` 验证
+2. **安全组**：云厂商控制台的入站规则要放通 **80 和 443**（只在服务器里开 ufw 不够）
+3. **备案**：中国大陆节点上，域名走 80/443 需要 ICP 备案，否则会被云厂商或运营商拦（见文末「关于备案」）
 
 **装配置文件**：
 
@@ -82,7 +95,15 @@ sudo mkdir -p /var/log/caddy && sudo chown caddy:caddy /var/log/caddy
 sudo systemctl reload caddy
 ```
 
-> 服务是 `caddy`，不是 `caddy.service` 的别名问题；若 `reload` 报错看 `journalctl -u caddy`。
+> 服务名是 `caddy`；若 `reload` 报错看 `journalctl -u caddy -n 50`。
+
+证书是**自动申请、自动续期**的，不用管。想确认：
+
+```bash
+journalctl -u caddy -n 30 | grep -i -E "certificate|acme|tls"
+# 或者从外部看
+curl -vI https://travel.zncu.xin 2>&1 | grep -i "subject\|issuer\|expire"
+```
 
 ### 5.（可选但推荐）加 Redis 存会话
 
@@ -127,6 +148,38 @@ caddy hash-password --plaintext "$(openssl rand -base64 12)"
 ```
 
 改完 `sudo systemctl reload caddy` 即可，不用重启应用。
+
+## 关于备案（大陆节点必读）
+
+云服务器在中国大陆时，**域名走 80/443 是要求 ICP 备案的**，未备案会被云厂商或运营商拦截。
+典型表现很迷惑人：`ping` 通、`dig` 正常、`ssh` 好用，但 `curl https://你的域名` 就是超时。
+
+先确认你自己的情况：
+
+```bash
+# 1. 域名解析对不对（在本地电脑跑）
+dig +short travel.zncu.xin          # 或 nslookup travel.zncu.xin
+
+# 2. 80/443 通不通（在本地电脑跑）
+curl -sv --max-time 5 http://travel.zncu.xin   # 卡住无响应 → 大概率被拦
+
+# 3. 云控制台看一眼入站规则有没有 80/443（腾讯云：轻量应用服务器 → 防火墙 / CVM → 安全组）
+```
+
+三条路的取舍：
+
+| 情况 | 做法 | 代价 |
+|---|---|---|
+| **已经备案** | 按本文档走 `SITE_ADDRESS=travel.zncu.xin`，全自动 HTTPS | 无 |
+| **没备案，只是朋友短期用** | `SITE_ADDRESS=:8443` + `tls internal`（自签证书）。浏览器会提示"不安全"，点"继续访问"即可 | 每次换浏览器都要点一次，且密码仍在 HTTPS 里（比 HTTP 好） |
+| **没备案，想长期用** | 要么去办备案（免费，一般 1–3 周，需要在云厂商处提交），要么换成香港/海外节点（无需备案，但国内访问慢） | 时间或延迟 |
+
+> `tls internal` 的写法：把 Caddyfile 里站点块的第一行改成
+> `{$SITE_ADDRESS:localhost} {` 保持不变，然后在块内加一行 `tls internal`，
+> 并把 `/etc/caddy/environment` 设为 `SITE_ADDRESS=:8443`。
+> 自签证书换机器/换域名要重新点一次信任。
+
+**不建议**的做法：为了绕备案把服务挂在 80 端口用 IP 裸跑——一旦被扫描到，账号和额度都不安全。
 
 ## 想用 Docker 的话
 
