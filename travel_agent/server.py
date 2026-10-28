@@ -19,9 +19,11 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import uuid
 from contextlib import asynccontextmanager
 from pathlib import Path
+from urllib.parse import quote
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, StreamingResponse
@@ -97,7 +99,11 @@ async def index() -> FileResponse:
     page = WEB_DIR / "index.html"
     if not page.exists():
         raise HTTPException(500, f"找不到前端页面：{page}")
-    return FileResponse(page, media_type="text/html; charset=utf-8")
+    # no-cache = 每次都回源校验。前端是单文件，改了就该立刻生效，
+    # 不然手机上很容易拿到旧 JS（没有指纹文件名，缓存很难自己失效）。
+    return FileResponse(
+        page, media_type="text/html; charset=utf-8", headers={"Cache-Control": "no-cache"}
+    )
 
 
 @app.get("/api/health")
@@ -293,13 +299,38 @@ async def resume(sid: str, req: ResumeRequest):
 # --------------------------------------------------------------------------- #
 # 下载
 # --------------------------------------------------------------------------- #
+def _content_disposition(name: str, fallback: str) -> str:
+    """给 Content-Disposition 同时带上 ASCII 兜底名和 RFC 5987 的 UTF-8 名。
+
+    为什么必须这么写：
+        只给 `filename*=utf-8''...` 时，iOS Safari / Android WebView / 微信内置浏览器
+        会退化成"从 URL 里猜文件名"。我们的 URL 是 /api/download?name=...（没有扩展名），
+        猜不到就直接放弃下载 —— 表现就是"电脑能下、手机点了没反应"。
+        补一个 ASCII 的 filename="..."，这些浏览器就正常了。
+    """
+    suffix = Path(name).suffix
+    stem = Path(name).stem
+    ascii_stem = re.sub(r"[^A-Za-z0-9._-]", "", stem).strip("-_.")
+    if not ascii_stem:
+        ascii_stem = fallback
+    elif ascii_stem[0].isdigit():
+        ascii_stem = f"{fallback}-{ascii_stem}"
+    return f'attachment; filename="{ascii_stem}{suffix}"; filename*=UTF-8\'\'{quote(name)}'
+
+
 @app.get("/api/download")
 async def download(name: str):
     root = config.OUTPUT_DIR.resolve()
     path = (root / name).resolve()
     if root not in path.parents or not path.is_file():
         raise HTTPException(404, "文件不存在")
-    return FileResponse(path, filename=name, media_type="text/markdown; charset=utf-8")
+    return FileResponse(
+        path,
+        # 用 octet-stream 而不是 text/markdown：手机的浏览器遇到 text/markdown
+        # 往往尝试"显示"而不是"下载"，用户就以为点了没反应。
+        media_type="application/octet-stream",
+        headers={"Content-Disposition": _content_disposition(name, "travel-plan")},
+    )
 
 
 @app.get("/api/proposal.pdf")
@@ -318,7 +349,7 @@ async def proposal_pdf(name: str):
 
     pdf_path = md_path.with_suffix(".pdf")
     if pdf_path.is_file() and pdf_path.stat().st_mtime >= md_path.stat().st_mtime:
-        return FileResponse(pdf_path, media_type="application/pdf", filename=pdf_path.name)
+        return _pdf_response(pdf_path)
 
     result = await asyncio.to_thread(
         render_pdf, md_path.read_text(encoding="utf-8"), pdf_path
@@ -331,7 +362,15 @@ async def proposal_pdf(name: str):
             f"{detail}{('：' + reasons) if reasons else ''}。{result.get('hint', '')}".strip(),
         )
 
-    return FileResponse(pdf_path, media_type="application/pdf", filename=pdf_path.name)
+    return _pdf_response(pdf_path)
+
+
+def _pdf_response(pdf_path: Path) -> FileResponse:
+    return FileResponse(
+        pdf_path,
+        media_type="application/pdf",
+        headers={"Content-Disposition": _content_disposition(pdf_path.name, "travel-plan")},
+    )
 
 
 # --------------------------------------------------------------------------- #

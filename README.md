@@ -339,6 +339,7 @@ python -m unittest discover tests -v
 | PDF 里中文是方块 | 缺中文字体：Linux 装 `fonts-noto-cjk` |
 | 网页表单中文输入乱跳 | 已在 keydown 里判断 `isComposing`；若仍异常请告知浏览器与输入法 |
 | 会话刷新后丢失 | 默认内存存储，重启即清空；配 `REDIS_URL` 可持久化 |
+| 手机上点「下载」没反应、电脑正常 | ① 只给 `filename*=utf-8''` 没有 ASCII 兜底，手机浏览器猜不到名字就放弃；② `text/markdown` 被当成可显示内容；③ 微信/QQ 内置浏览器不支持下载文件 | 服务端补 ASCII `filename="..."` + 改 `application/octet-stream`；前端改用 `<a download>` 触发；必要时用系统浏览器打开 |
 
 ---
 

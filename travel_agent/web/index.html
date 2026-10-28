@@ -597,6 +597,23 @@ const PRINT_CSS = `
   @page{margin:16mm}
 `;
 
+/**
+ * 触发文件下载。
+ * 用 <a download> + click，比 window.location 在手机浏览器上可靠得多：
+ * 后者在 iOS Safari / 部分 Android 上会被当成一次普通跳转，遇到
+ * Content-Disposition 处理不佳时直接静默失败。
+ */
+function triggerDownload(url, filename) {
+  const a = document.createElement('a');
+  a.href = url;
+  if (filename) a.download = filename;
+  a.rel = 'noopener';
+  a.style.display = 'none';
+  document.body.appendChild(a);
+  a.click();
+  setTimeout(() => a.remove(), 1000);
+}
+
 function exportPdf(title) {
   const win = window.open('', '_blank');
   if (!win) {
@@ -624,22 +641,24 @@ function showResult(message, file) {
   downloadEl.innerHTML = '';
   if (file) {
     const md = el('button', 'ghost', '下载 Markdown');
-    md.onclick = () => { window.location = '/api/download?name=' + encodeURIComponent(file); };
+    md.onclick = () => triggerDownload('/api/download?name=' + encodeURIComponent(file), file);
 
     // 优先让服务端转 PDF（服务器部署时浏览器打印不可用）；
     // 没装引擎就退回浏览器打印，并说清楚为什么。
     const pdf = el('button', 'ghost', '导出 PDF');
     if (state.pdfEngines && state.pdfEngines.length) {
       pdf.title = '服务端生成 · 引擎 ' + state.pdfEngines.join(' / ');
-      pdf.onclick = () => {
-        window.location = '/api/proposal.pdf?name=' + encodeURIComponent(file);
-      };
+      pdf.onclick = () =>
+        triggerDownload('/api/proposal.pdf?name=' + encodeURIComponent(file),
+                        file.replace(/\.md$/, '.pdf'));
     } else {
       pdf.title = '服务端未安装 PDF 引擎，将用浏览器打印（可选「另存为 PDF」）';
       pdf.onclick = () => exportPdf(file.replace(/\.md$/, ''));
     }
 
-    downloadEl.append(md, pdf, el('span', 'hint', file));
+    const note = el('span', 'hint',
+      '手机点了没反应？请用系统浏览器打开本页（微信/QQ 内置浏览器不支持下载文件）');
+    downloadEl.append(md, pdf, el('span', 'hint', file), note);
   }
 
   resultBox.style.display = '';
