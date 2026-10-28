@@ -106,9 +106,16 @@ CAPABILITIES: dict[str, list[str]] = {
 def _npx_server(package: str) -> dict:
     """生成一个用 npx 启动的 stdio MCP server 配置。
 
+    优先用「已全局安装的可执行文件」：服务器上 `npm i -g 12306-mcp` 之后启动只需几十毫秒，
+    而且不依赖运行时联网（`npx -y` 每次都要校验/下载，慢且在离线环境会失败）。
+
     Windows 上有个必踩的坑：npx 其实是 `.cmd` 批处理，CreateProcess 不能直接执行
     批处理文件，直接把它当 command 会报"找不到命令"。统一走 `cmd /c npx` 最稳。
     """
+    installed = shutil.which(package)
+    if installed and (os.name != "nt" or installed.lower().endswith(".exe")):
+        return {"command": installed, "args": []}
+
     if os.name == "nt":
         return {"command": "cmd", "args": ["/c", "npx", "-y", package]}
     return {"command": "npx", "args": ["-y", package]}

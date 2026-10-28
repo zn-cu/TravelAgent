@@ -1,0 +1,34 @@
+[Unit]
+Description=Travel Planning Agent (FastAPI)
+Documentation=https://github.com/zn-cu/TravelAgent
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=travel
+Group=travel
+WorkingDirectory=/opt/travel-agent
+
+# 输出不要缓冲，否则 journalctl 里看不到实时进度
+Environment=PYTHONUNBUFFERED=1
+Environment=PYTHONUTF8=1
+
+# ⚠️ 绝对不要加 --workers：HITL 的中断状态（checkpointer）存在进程内存里，
+#    多进程会导致「中断在 A 进程、恢复请求打到 B 进程」，报"没有待确认的动作"。
+# ⚠️ 只监听 127.0.0.1：对外唯一入口是 Caddy（它负责 HTTPS 和账号密码）。
+#    应用本身没有任何鉴权，别把 8000 直接暴露到公网。
+ExecStart=/opt/travel-agent/.venv/bin/python -m travel_agent.server --host 127.0.0.1 --port 8000
+
+Restart=always
+RestartSec=3
+
+# 4G 机器给个上限，防止 PDF 渲染抖动把内存吃光（超了会被 OOM 杀掉然后自动重启）
+MemoryMax=2G
+
+# 简单的沙箱收紧
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

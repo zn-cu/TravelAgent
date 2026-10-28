@@ -1,0 +1,44 @@
+# Caddyfile —— 对外唯一入口：HTTPS + 一个共享账号 + 不缓冲的流式转发
+#
+# 安装位置：/etc/caddy/Caddyfile
+# 站点地址从环境变量 SITE_ADDRESS 读（见 /etc/caddy/environment）：
+#   有域名   → SITE_ADDRESS=travel.example.com   （自动申请 Let's Encrypt 证书）
+#   只有 IP  → SITE_ADDRESS=:80                  （纯 HTTP，密码明文传输，只适合临时试用）
+#
+# 改完执行：systemctl reload caddy
+
+{$SITE_ADDRESS:localhost} {
+	encode zstd gzip
+
+	# ① 鉴权：一个共享账号，几个人共用一个密码。
+	#    口令是 bcrypt 哈希，不是明文。生成方法（服务器上执行）：
+	#        caddy hash-password --plaintext '你的新密码'
+	#    然后把它整行粘贴替换下面 <HASH> 的位置（哈希里有 $ 符号，别加引号）。
+	basic_auth {
+		sunlianwu <HASH>
+	}
+
+	# ③ 流式转发：关掉响应缓冲，否则前端日志会"攒一批才刷出来"，看起来像卡死。
+	#    超时给到 5 分钟 —— 一次完整规划要跑 1~3 分钟，中途还有 HITL 等待。
+	reverse_proxy 127.0.0.1:8000 {
+		flush_interval -1
+		transport http {
+			read_timeout 300s
+			write_timeout 300s
+		}
+	}
+
+	header {
+		X-Content-Type-Options nosniff
+		Referrer-Policy no-referrer
+		# 只有启用了 HTTPS 才有意义；HTTP 模式下浏览器会忽略
+		Strict-Transport-Security "max-age=31536000"
+	}
+
+	log {
+		output file /var/log/caddy/travel-agent.log {
+			roll_size 10MiB
+			roll_keep 5
+		}
+	}
+}

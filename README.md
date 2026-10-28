@@ -203,9 +203,15 @@ python -m travel_agent.cli "我想去成都玩3天"
 ```
 旅游规划agent/
 ├─ check_env.py               环境自检（会打印 MCP 真实工具名）
-├─ Dockerfile                 部署镜像（Python 3.12 + Node 22 + 中文字体）
+├─ Dockerfile                 可选：容器化部署（Python 3.12 + Node 22 + 中文字体）
 ├─ requirements.txt
 ├─ .env.example
+│
+├─ deploy/                    原生部署包（推荐）
+│   ├─ install.sh             一键装环境（系统包 / Node 22 / 12306-mcp / venv / systemd）
+│   ├─ travel-agent.service   systemd 单元（单进程 + 只绑 127.0.0.1）
+│   ├─ Caddyfile              反代：HTTPS + 共享账号 + 不缓冲流式
+│   └─ README.md              部署步骤与故障排查
 │
 ├─ travel_agent/
 │   ├─ config.py              模型 / MCP 配置 / 能力映射 / 阈值
@@ -255,6 +261,97 @@ python -m travel_agent.cli "我想去成都玩3天"
 | `PDF_ENGINE` | `auto` | `auto` / `weasyprint` / `xhtml2pdf` / `word` |
 
 命令行也有等价开关：`--skip amap`、`--timeout 30`、`--list-tools`（只自检 MCP）。
+
+---
+
+## 关键设计（为什么这么写）
+
+| 决定 | 原因 |
+|---|---|
+| 工具走 **MCP** 而非直接 `@tool` | 工具能脱离 Agent 独立测试、能被别的 MCP 客户端复用；顺带学会了「自研 MCP + 第三方 MCP 混用」 |
+| **能力映射**而不是硬编码工具名 | 第三方工具名会变（`get-tickets` / `get_tickets`），按候选名匹配 + 去重，缺了只 warn 不崩 |
+| 每个专家**只给一个工具** | 权限最小化：景点推荐官看不到预算，财务管家查不了车票，比在 prompt 里写"别越界"可靠 |
+| Skills 只写**怎么做** | 4 份纯 markdown，零代码；描述写具体才能被正确命中 |
+| 中间件只做 2 个 | 调用日志（调试全靠它）+ 12306 限流（第三方接口必须防限流）。其余都是过度设计 |
+| HITL 只留 2 处 | 方案确认（必经）+ 超预算条件中断（平时不打扰） |
+| 落盘靠 `publish_proposal` | 不能靠"最后一条 AI 文本"——追问、寒暄都会被存成"策划书"。工具还拒绝 <120 字的内容 |
+| PDF 三引擎可插拔 | `weasyprint`（服务器）/ `xhtml2pdf`（纯 wheel）/ `word`（仅 Windows），强依赖环境所以必须能换 |
+
+---
+
+## 测试
+
+```bash
+python -m unittest discover tests -v
+```
+
+全部**不需要联网、不需要 API Key**。覆盖：
+
+| 文件 | 覆盖内容 |
+|---|---|
+| `test_budget.py` | 预算解析（中文标点、`金额*数量`、脏输入） |
+| `test_ratelimit.py` | 限流器（间隔、上限、超额返回） |
+| `test_store.py` | 会话存储（增删改查、日志截断、排序） |
+| `test_streaming.py` | 流式事件（工具调用、专家名反查、中断、异常、落盘判定） |
+| `test_publish.py` | 落盘校验（短内容拒绝、同名不覆盖、自动建目录） |
+| `test_geo.py` | 高德链接（坐标解析、URL 编码、部分失败） |
+| `test_pdf.py` | PDF 引擎选择、失败兜底、异常后继续试下一个 |
+
+---
+
+## 部署
+
+**推荐原生部署**（systemd + Caddy），4 核 4G 的机器足够，而且没有 Docker 那一层的心智负担：
+
+```
+公网 ──▶ Caddy(80/443，HTTPS + 账号密码) ──▶ uvicorn(8000，只绑 127.0.0.1) ──▶ Agent
+```
+
+完整步骤、防火墙、口令配置、常见故障见 **[deploy/README.md](deploy/README.md)**。四件事必须做到：
+
+| # | 为什么 |
+|---|---|
+| 反代加**账号密码** | 应用本身没有任何鉴权，公网裸奔等于把 API 额度送人 |
+| 应用只绑 `127.0.0.1` | 绕不过 Caddy，鉴权才有效 |
+| **单进程**（不加 `--workers`） | HITL 中断状态在进程内存里，多进程会让"确认"随机失效 |
+| 反代**关缓冲 + 长超时** | 否则前端流式日志卡住不动，且 1~3 分钟的单轮会被 504 掐断 |
+
+Docker 也支持（`Dockerfile` 里 Node 22 和中文字体都装好了），但记得把 `output/` 挂成 volume。
+
+**上线前必做**：把 `AMAP_MAPS_API_KEY` 换成正式申请的新 key，`.env` 不要进版本库。
+
+---
+
+## 排错
+
+| 症状 | 先看哪 |
+|---|---|
+| 启动时某个 MCP 连不上 | `python check_env.py`，或 `--list-tools`；连不上会被跳过并打印原因 |
+| 专家没有工具 | 能力映射没命中 → 把 check_env 打印的真实工具名补进 `config.CAPABILITIES` |
+| Agent 自己硬答不派活 | `subagents` 的 `description` 不够具体，或 CEO prompt 强调不足 |
+| 一调用工具就失败 | `logs/trace.jsonl` 最后一条的 `status` |
+| 卡在"输出中" | 服务端日志；多半是某个工具在超时重试 |
+| 追问轮也出现了下载按钮 | 不该发生——落盘只认 `publish_proposal`，用 `output/` 里是否真有文件确认 |
+| 提交决策报"决策数量不对" | 一次可能挂了多个待确认动作，必须每张卡片都选 |
+| PDF 里中文是方块 | 缺中文字体：Linux 装 `fonts-noto-cjk` |
+| 网页表单中文输入乱跳 | 已在 keydown 里判断 `isComposing`；若仍异常请告知浏览器与输入法 |
+| 会话刷新后丢失 | 默认内存存储，重启即清空；配 `REDIS_URL` 可持久化 |
+
+---
+
+## 已知限制
+
+- **机票是估算值**：没有免费可用的机票 MCP（高德不管、12306 不管、飞猪要商务授权），
+  `estimate_flight` 是按距离的确定性公式，结果里会标注"估算"。
+- **门票经常"待补充"**：高德 POI 不一定返回票价。宁可留空也不让模型编——这是刻意的。
+- **12306 是第三方非官方接口**，有风控；限流 + 错误退避，仅适合学习演示，别拿去生产。
+- **会话持久化不覆盖中断状态**：配了 Redis 也只是存会话日志，LangGraph 的 checkpointer
+  仍在进程内存里，所以"重启后接着处理那个待确认的动作"做不到。
+- **单进程内存会话**：不配 Redis 时，重启即丢，也不能多 worker。
+
+---
+
+## 想读代码的话
 
 按这个顺序看，每一层都是下一层的基础：
 
